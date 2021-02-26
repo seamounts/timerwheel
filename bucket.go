@@ -18,6 +18,14 @@ type Task struct {
 	data interface{}
 }
 
+func NewTask(expiration int64, callback func(data interface{}), data interface{}) *Task {
+	return &Task{
+		expiration: expiration,
+		callback:   callback,
+		data:       data,
+	}
+}
+
 func (t *Task) GetData() interface{} {
 	return t.data
 }
