@@ -215,3 +215,12 @@ func (tw *TimerWheel) AfterFunc(d time.Duration, f func(data interface{}), data 
 	tw.add(t)
 	return t
 }
+
+// AddTask 加入定时任务
+func (tw *TimerWheel) AddTask(t *Task) *Task {
+	if t == nil {
+		return nil
+	}
+	tw.add(t)
+	return t
+}
