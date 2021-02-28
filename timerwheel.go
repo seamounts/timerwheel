@@ -31,7 +31,7 @@ type TimerWheel struct {
 	callbackSync bool
 	runningTasks []*Task
 	taskSets     map[string]*Task
-	mu           sync.Mutex
+	mu           sync.RWMutex
 }
 
 // NewTimerWheel creates an instance of TimingWheel with the given tick and wheelSize.
@@ -215,8 +215,12 @@ func (tw *TimerWheel) AddTask(d time.Duration, key string) *Task {
 	}
 
 	tw.mu.Lock()
+	defer tw.mu.Unlock()
+	// if old task found, stop and add new task
+	if t, ok := tw.taskSets[key]; ok {
+		t.Stop()
+	}
 	tw.taskSets[key] = t
-	tw.mu.Unlock()
 
 	tw.add(t)
 	return t
@@ -224,8 +228,8 @@ func (tw *TimerWheel) AddTask(d time.Duration, key string) *Task {
 
 // HasTask has task
 func (tw *TimerWheel) HasTask(key string) bool {
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
+	tw.mu.RLock()
+	defer tw.mu.RUnlock()
 	_, ok := tw.taskSets[key]
 	return ok
 }
@@ -233,8 +237,8 @@ func (tw *TimerWheel) HasTask(key string) bool {
 // flushTasks pop all task from bucket and filterd by task set
 func (tw *TimerWheel) flushTasks(b *bucket) []*Task {
 	ts := b.flushTasks()
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
+	tw.mu.RLock()
+	defer tw.mu.RUnlock()
 	var retTasks []*Task
 	for i := range ts {
 		key := ts[i].GetKey()
