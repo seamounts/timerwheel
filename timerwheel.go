@@ -187,16 +187,9 @@ func (tw *TimerWheel) Start() {
 			case elem := <-tw.queue.C:
 				b := elem.(*bucket)
 				tw.advanceClock(b.Expiration())
-				ts := b.flushTasks()
+				ts := tw.flushTasks(b)
 
-				var filterTasks []*Task
-				for _, t := range ts {
-					if tw.HasTask(t.GetKey()) {
-						filterTasks = append(filterTasks, t)
-					}
-					tw.RemoveTask(t.GetKey())
-				}
-				tw.reAddOrRun(filterTasks)
+				tw.reAddOrRun(ts)
 
 			case <-tw.exitC:
 				return
@@ -240,6 +233,27 @@ func (tw *TimerWheel) HasTask(key string) bool {
 	defer tw.mu.Unlock()
 	_, ok := tw.taskSets[key]
 	return ok
+}
+
+// flushTasks pop all task from bucket and filterd by task set
+func (tw *TimerWheel) flushTasks(b *bucket) []*Task {
+	ts := b.flushTasks()
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+
+	var retTasks []*Task
+	for i := range ts {
+		key := ts[i].GetKey()
+
+		if _, ok := tw.taskSets[key]; !ok {
+			continue
+		}
+
+		retTasks = append(retTasks, ts[i])
+		delete(tw.taskSets, key)
+	}
+
+	return retTasks
 }
 
 // RemoveTask remove task from task set
