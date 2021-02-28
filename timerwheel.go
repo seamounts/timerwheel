@@ -157,12 +157,11 @@ func (tw *TimerWheel) reAddOrRun(ts []*Task) {
 
 // runTasks 运行到期任务，任务异步执行
 func (tw *TimerWheel) runTasks() {
-	if len(tw.runningTasks) == 0 {
+	if len(tw.runningTasks) == 0 ||
+		tw.callback == nil {
 		return
 	}
-	if tw.callback == nil {
-		return
-	}
+	tw.removeTasks(tw.runningTasks)
 
 	if tw.callbackSync {
 		tw.callback(tw.runningTasks)
@@ -236,31 +235,30 @@ func (tw *TimerWheel) flushTasks(b *bucket) []*Task {
 	ts := b.flushTasks()
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
-
 	var retTasks []*Task
 	for i := range ts {
 		key := ts[i].GetKey()
-
-		if _, ok := tw.taskSets[key]; !ok {
-			continue
+		if _, ok := tw.taskSets[key]; ok {
+			retTasks = append(retTasks, ts[i])
 		}
-
-		retTasks = append(retTasks, ts[i])
-		delete(tw.taskSets, key)
 	}
 
 	return retTasks
 }
 
+// removeTasks remove batch tasks from taskset
+func (tw *TimerWheel) removeTasks(ts []*Task) {
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+	for _, t := range ts {
+		delete(tw.taskSets, t.GetKey())
+	}
+}
+
 // RemoveTask remove task from task set
 func (tw *TimerWheel) RemoveTask(key string) {
-	t, ok := tw.taskSets[key]
-	if !ok {
-		return
-	}
-	t.Stop()
-
 	tw.mu.Lock()
+	defer tw.mu.Unlock()
 	delete(tw.taskSets, key)
-	tw.mu.Lock()
+
 }
