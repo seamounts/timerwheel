@@ -12,7 +12,7 @@ func genD(i int) time.Duration {
 }
 
 func BenchmarkTimingWheel_StartStop(b *testing.B) {
-	tw := timingwheel.NewTimerWheel(1*time.Second, 60, execTasks)
+	tw := timingwheel.NewTimerWheel(1*time.Second, 60, execTasks, false)
 	tw.Start()
 	defer tw.Stop()
 
@@ -22,18 +22,18 @@ func BenchmarkTimingWheel_StartStop(b *testing.B) {
 	}{
 		{"N-1m", 1000000},
 		{"N-5m", 5000000},
-		{"N-10m", 10000000},
+		{"N-30m", 30000000},
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
 			base := make([]*timingwheel.Task, c.N)
 			for i := 0; i < len(base); i++ {
-				base[i] = tw.AfterFunc(genD(i), func(data interface{}) {}, "")
+				base[i] = tw.AddTask(genD(i), "")
 			}
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				tw.AfterFunc(time.Second, func(data interface{}) {}, "").Stop()
+				tw.AddTask(time.Second, "").Stop()
 			}
 
 			b.StopTimer()
@@ -51,7 +51,7 @@ func BenchmarkStandardTimer_StartStop(b *testing.B) {
 	}{
 		{"N-1m", 1000000},
 		{"N-5m", 5000000},
-		{"N-10m", 10000000},
+		{"N-30m", 30000000},
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {

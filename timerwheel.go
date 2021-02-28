@@ -24,14 +24,16 @@ type TimerWheel struct {
 	// NOTE: This field may be updated and read concurrently, through Add().
 	overflowWheel unsafe.Pointer // type: *TimingWheel
 
-	exitC          chan struct{}
-	waitGroup      waitGroupWrapper
-	bucketCallback BucketCallback
-	runningTasks   []*Task
+	exitC        chan struct{}
+	waitGroup    waitGroupWrapper
+	callback     func(ts []*Task)
+	callbackSync bool
+	runningTasks []*Task
 }
 
 // NewTimerWheel creates an instance of TimingWheel with the given tick and wheelSize.
-func NewTimerWheel(tick time.Duration, wheelSize int64, callback BucketCallback) *TimerWheel {
+func NewTimerWheel(tick time.Duration, wheelSize int64, callback func(ts []*Task),
+	callbackSync bool) *TimerWheel {
 	tickMs := int64(tick / time.Millisecond)
 	if tickMs <= 0 {
 		panic(errors.New("tick must be greater than or equal to 1ms"))
@@ -45,27 +47,28 @@ func NewTimerWheel(tick time.Duration, wheelSize int64, callback BucketCallback)
 		startMs,
 		delayqueue.New(int(wheelSize)),
 		callback,
+		callbackSync,
 	)
 }
 
 // newTimerWheel is an internal helper function that really creates an instance of TimingWheel.
 func newTimerWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayqueue.DelayQueue,
-	callback BucketCallback) *TimerWheel {
+	callback func(ts []*Task), callbackSync bool) *TimerWheel {
 	buckets := make([]*bucket, wheelSize)
 	for i := range buckets {
 		buckets[i] = newBucket()
-		buckets[i].callback = callback
 	}
 
 	tw := &TimerWheel{
-		tick:           tickMs,
-		wheelSize:      wheelSize,
-		currentTime:    truncate(startMs, tickMs),
-		interval:       tickMs * wheelSize,
-		buckets:        buckets,
-		queue:          queue,
-		bucketCallback: callback,
-		exitC:          make(chan struct{}),
+		tick:         tickMs,
+		wheelSize:    wheelSize,
+		currentTime:  truncate(startMs, tickMs),
+		interval:     tickMs * wheelSize,
+		buckets:      buckets,
+		queue:        queue,
+		callback:     callback,
+		callbackSync: callbackSync,
+		exitC:        make(chan struct{}),
 	}
 
 	return tw
@@ -105,7 +108,8 @@ func (tw *TimerWheel) add(t *Task) {
 					tw.wheelSize,
 					currentTime,
 					tw.queue,
-					tw.bucketCallback,
+					tw.callback,
+					tw.callbackSync,
 				)),
 			)
 			overflowWheel = atomic.LoadPointer(&tw.overflowWheel)
@@ -152,14 +156,16 @@ func (tw *TimerWheel) runTasks() {
 	if len(tw.runningTasks) == 0 {
 		return
 	}
-	if tw.bucketCallback != nil {
-		go tw.bucketCallback(tw.runningTasks)
+	if tw.callback == nil {
 		return
+	}
 
+	if tw.callbackSync {
+		tw.callback(tw.runningTasks)
+	} else {
+		go tw.callback(tw.runningTasks)
 	}
-	for _, t := range tw.runningTasks {
-		go t.callback(t.GetData())
-	}
+
 	tw.runningTasks = nil
 }
 
@@ -203,24 +209,13 @@ func (tw *TimerWheel) Stop() {
 	tw.waitGroup.Wait()
 }
 
-// AfterFunc waits for the duration to elapse and then calls f in its own goroutine.
-// It returns a Timer that can be used to cancel the call using its Stop method.
-func (tw *TimerWheel) AfterFunc(d time.Duration, f func(data interface{}), data interface{}) *Task {
+// AddTask 加入定时任务
+func (tw *TimerWheel) AddTask(d time.Duration, key string) *Task {
 	t := &Task{
 		expiration: timeToMs(time.Now().UTC().Add(d)),
-		callback:   f,
-		data:       data,
-	}
-
-	tw.add(t)
-	return t
-}
-
-// AddTask 加入定时任务
-func (tw *TimerWheel) AddTask(t *Task) *Task {
-	if t == nil {
-		return nil
+		key:        key,
 	}
 	tw.add(t)
+
 	return t
 }

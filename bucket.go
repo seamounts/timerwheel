@@ -10,24 +10,22 @@ import (
 // Task 延时任务
 type Task struct {
 	expiration int64 // in milliseconds
-	callback   func(data interface{})
 	b          unsafe.Pointer
 	element    *list.Element
 
-	// 任务自定义数据，调用 callback 时作为参数传入
-	data interface{}
+	// 任务唯一标志
+	key string
 }
 
-func NewTask(expiration int64, callback func(data interface{}), data interface{}) *Task {
+func NewTask(expiration int64, key string) *Task {
 	return &Task{
 		expiration: expiration,
-		callback:   callback,
-		data:       data,
+		key:        key,
 	}
 }
 
-func (t *Task) GetData() interface{} {
-	return t.data
+func (t *Task) GetKey() string {
+	return t.key
 }
 
 func (t *Task) getBucket() *bucket {
@@ -53,7 +51,6 @@ func (t *Task) Stop() bool {
 	return stopped
 }
 
-type BucketCallback func(ts []*Task)
 type bucket struct {
 	// 64-bit atomic operations require 64-bit alignment, but 32-bit
 	// compilers do not ensure it. So we must keep the 64-bit field
@@ -63,9 +60,8 @@ type bucket struct {
 	// and https://go101.org/article/memory-layout.html.
 	expiration int64
 
-	mu       sync.Mutex
-	timers   *list.List
-	callback BucketCallback
+	mu     sync.Mutex
+	timers *list.List
 }
 
 func newBucket() *bucket {
