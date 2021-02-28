@@ -196,10 +196,6 @@ func (tw *TimerWheel) Start() {
 			}
 		}
 	})
-
-	tw.waitGroup.Wrap(func() {
-		tw.runTasks()
-	})
 }
 
 // Stop stops the current timing wheel.
