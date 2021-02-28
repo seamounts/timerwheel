@@ -111,8 +111,8 @@ func (b *bucket) Remove(t *Task) bool {
 	return b.remove(t)
 }
 
-// FlushTasks 清空 bucket 中的所有延时任务并返回
-func (b *bucket) FlushTasks() []*Task {
+// fushTasks pop all task in bucket
+func (b *bucket) flushTasks() []*Task {
 	var ts []*Task
 
 	b.mu.Lock()

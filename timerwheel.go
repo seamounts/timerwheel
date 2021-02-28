@@ -2,6 +2,7 @@ package timerwheel
 
 import (
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -29,6 +30,8 @@ type TimerWheel struct {
 	callback     func(ts []*Task)
 	callbackSync bool
 	runningTasks []*Task
+	taskSets     map[string]*Task
+	mu           sync.Mutex
 }
 
 // NewTimerWheel creates an instance of TimingWheel with the given tick and wheelSize.
@@ -69,6 +72,7 @@ func newTimerWheel(tickMs int64, wheelSize int64, startMs int64, queue *delayque
 		callback:     callback,
 		callbackSync: callbackSync,
 		exitC:        make(chan struct{}),
+		taskSets:     make(map[string]*Task),
 	}
 
 	return tw
@@ -133,9 +137,9 @@ func (tw *TimerWheel) advanceClock(expiration int64) {
 	}
 }
 
-// reInsert 将任务重新插入时间轮
+// reAddOrRun 将任务重新插入时间轮，如果有到期的任务，则运行
 // 通常是将高层时间轮的任务降级插入到低级时间轮
-func (tw *TimerWheel) reInsert(ts []*Task) {
+func (tw *TimerWheel) reAddOrRun(ts []*Task) {
 	for _, t := range ts {
 		// 将已经到期的任务放入到 runningTasks 列表
 		if t.expiration < tw.currentTime+tw.tick {
@@ -183,11 +187,17 @@ func (tw *TimerWheel) Start() {
 			case elem := <-tw.queue.C:
 				b := elem.(*bucket)
 				tw.advanceClock(b.Expiration())
+				ts := b.flushTasks()
 
-				ts := b.FlushTasks()
+				var filterTasks []*Task
+				for _, t := range ts {
+					if tw.HasTask(t.GetKey()) {
+						filterTasks = append(filterTasks, t)
+					}
+					tw.RemoveTask(t.GetKey())
+				}
+				tw.reAddOrRun(filterTasks)
 
-				// 任务重新插入时间轮
-				tw.reInsert(ts)
 			case <-tw.exitC:
 				return
 			}
@@ -209,13 +219,38 @@ func (tw *TimerWheel) Stop() {
 	tw.waitGroup.Wait()
 }
 
-// AddTask 加入定时任务
+// AddTask add timer task
 func (tw *TimerWheel) AddTask(d time.Duration, key string) *Task {
 	t := &Task{
 		expiration: timeToMs(time.Now().UTC().Add(d)),
 		key:        key,
 	}
-	tw.add(t)
 
+	tw.mu.Lock()
+	tw.taskSets[key] = t
+	tw.mu.Unlock()
+
+	tw.add(t)
 	return t
+}
+
+// HasTask has task
+func (tw *TimerWheel) HasTask(key string) bool {
+	tw.mu.Lock()
+	defer tw.mu.Unlock()
+	_, ok := tw.taskSets[key]
+	return ok
+}
+
+// RemoveTask remove task from task set
+func (tw *TimerWheel) RemoveTask(key string) {
+	t, ok := tw.taskSets[key]
+	if !ok {
+		return
+	}
+	t.Stop()
+
+	tw.mu.Lock()
+	delete(tw.taskSets, key)
+	tw.mu.Lock()
 }
